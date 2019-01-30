@@ -263,23 +263,23 @@ def getDistinctData(fileData):
 
 ####################### Helper of Join Tables ###############################
 def joinTwo(table1, table2):
-    if len(table1) == 0:
+    if not len(table1):
         return table2
-    main_table = list()
-    main_table.append(table1[0] + table2[0])
+    joinTable = []
+    joinTable.append(table1[0] + table2[0])
     for i in range(1,len(table1)):
         for j in range(1,len(table2)):
-            main_table.append(table1[i]+table2[j])
-    return main_table
+            joinTable.append(table1[i]+table2[j])
+    return joinTable
 
 ####################### Join Tables ###############################
-def joinQuery(table_list, table_columns):
-    main_table = list()
-    for table_name in table_list:
-        data = list(csv.reader(open(table_name + '.csv')))
-        data.insert(0, table_columns[table_name])
-        main_table = joinTwo(main_table,data)
-    return main_table
+def joinQuery(tableList, table_columns):
+    joinTable = []
+    for tableName in tableList:
+        data = list(readFile(tableName))
+        data.insert(0, table_columns[tableName])
+        joinTable = joinTwo(joinTable,data)
+    return joinTable
 
 ####################### Print Output Data ###############################
 def printData(fileData):
@@ -308,13 +308,8 @@ def printHeader(columnNames,tableNames, conditionData = ['']):
     print()
 
 ####################### Read Tables Data ###############################
-def readFile(tName,fileData):
-    csvfile = open(tName)
-    dialect = csv.Sniffer().sniff(csvfile.read(1024))
-    csvfile.seek(0)
-    reader = csv.reader(csvfile, dialect)
-    for row in reader:
-        fileData.append(row)
+def readFile(tName):
+    return csv.reader(open(tName + '.csv'))
 
 ####################### Separate Columns Name ###############################
 def getColName(token):
