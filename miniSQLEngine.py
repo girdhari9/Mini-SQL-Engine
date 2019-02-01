@@ -39,32 +39,31 @@ def queryExecution(parsedQuery, tokens):
         ####################### Preparing data for performing aggregate operations ###############################
         else:
             columnName = function[1]
+            check = 0
             if '.' in columnName:
+                check= 1
                 colTab = columnName.split('.')
                 columnName = colTab[1]
                 tablesName = [colTab[0]]
 
-            if not checkColumnAmb(tablesName, metaDataDictionary, columnName):
+            if not checkColumnAmb(tokens, tablesName, metaDataDictionary, columnName):
                 sys.exit("ERROR : Ambiguous column name: " + columnName)
 
             fileData, colNames = multipleTableQuery(tokens, tablesName, columnName, False)
+
             if columnName not in colNames:
-                sys.exit("ERROR : Invalid Attributes!")
+                sys.exit("ERROR : no such column" + columnName)
 
             columnsName = [columnName]
             printHeader(columnsName, tablesName)
 
             colList = []
-            if check == 0:
-                for data in fileData:
-                    colList.append(int(data[metaDataDictionary[tablesName[0]].index(columnName)]))
-            else:
-                for data in fileData:
-                    colList.append(data[0])
+            for data in fileData:
+                colList.append(data[0])
             aggregateOperation(function[0].lower(), colList)
 
     ####################### Handling where statements ###############################
-    else: 
+    else:
         tablesName = getTablesName(tokens[fromIndex[0] + 1])
         if not checkTableExistance(tablesName):
             print("ERROR : Table does not exists!")
@@ -82,14 +81,14 @@ def queryExecution(parsedQuery, tokens):
                     columnsName.append(columnName)
         else:
             columnsName = getColName(tokens[fromIndex[0] - 1])
-
-        for columnName in columnsName:
-            if not checkColumnAmb(tablesName, metaDataDictionary, columnName):
-                sys.exit("ERROR : Ambiguous column name: " + columnName)
+            for columnName in columnsName:
+                if not checkColumnAmb(tokens, tablesName, metaDataDictionary, columnName):
+                    sys.exit("ERROR : Ambiguous column name: " + columnName)
 
         conditionData, join = processWhere(tokens, columnsName, tablesName, distinct)
-        fileData, colNames = multipleTableQuery(tokens, tablesName, columnsName, distinct)
-        
+        #check all columns that are to be projected are exist or not
+        fileData, colNames = multipleTableQuery(tokens, tablesName, columnsName, distinct, conditionData, join)
+
         if join and tokens[fromIndex[0] - 1] == "*":
             printHeader(colNames, tablesName, conditionData)
         elif tokens[fromIndex[0] - 1] == "*":
@@ -124,7 +123,7 @@ def getSum(colList):
 ####################### Perform Aggregate Operation ###############################
 def aggregateOperation(operation, colList):
     if(operation == 'max'):
-        print(getMax(colList)) #Error
+        print(getMax(colList))
     elif(operation == 'min'):
         print(getMin(colList))
     elif(operation == 'sum'):
@@ -139,11 +138,23 @@ def aggregateOperation(operation, colList):
         print("ERROR: ","Unknown function : ", '"' + function[0] + '"')
 
 ####################### Check Ambiguous Columns ###############################
-def checkColumnAmb(tablesName, metaDataDictionary, columnName):
+def checkColumnAmb(tokens, tablesName, metaDataDictionary, columnName):
+    colName = []
+    if len(tokens) > fromIndex[0] + 2:
+        conditionData = re.sub(r"[\,]",' ',tokens[fromIndex[0] + 2]).split() #Error: write code to handle space
+        del conditionData[0]
+        if '.' in conditionData[0] and '.' in conditionData[2] and '=' == conditionData[1]:
+            colName.append(conditionData[2])
+        if 'and' in conditionData:
+            if '.' in conditionData[4] and '.' in conditionData[6] and '=' == conditionData[5]:
+                colName.append(conditionData[6])
+
     if len(tablesName) > 1:
         count = 0
         for tab in tablesName:
             if columnName in metaDataDictionary[tab]:
+                if columnName in colName:
+                    continue
                 if count > 0:
                     return False
                 else:
@@ -156,26 +167,27 @@ def checkColumnAmb(tablesName, metaDataDictionary, columnName):
 def processWhere(tokens, columnsName, tablesName, distinct):
     conditionData = re.sub(r"[\,]",' ',tokens[fromIndex[0] + 2]).split() #Error: write code to handle space
     del conditionData[0]
-    join = False
-    if len(conditionData) == 3 and '.' in conditionData[0] and '.' in conditionData[2] and '=' == conditionData[1]:
-        join = True
-    return conditionData, join
-
+    if 'or' in conditionData:
+        return conditionData, False
+    if '.' in conditionData[0] and '.' in conditionData[2] and '=' == conditionData[1]:
+        return conditionData, True
+    if 'and' in conditionData:
+        if '.' in conditionData[4] and '.' in conditionData[6] and '=' == conditionData[5]:
+            return conditionData, True
+    return conditionData, False
+        
 ####################### Prepare data by applying condition ###############################
 def whereQueryProcess(fileData, conditionData, columnsName, tablesName, join):
     index = -1
     if join:
         colNames, index = joinColumnProcess(columnsName, conditionData)
-    
     processedData = []
     for data in fileData:
         string = evaluate(conditionData, tablesName, data)
         if eval(string):
             if not index == -1:
                 data.pop(index)
-                processedData.append(data)
-            else:
-                processedData.append(data)
+            processedData.append(data)
     return processedData
 
 ####################### Check Table Existance ###############################
@@ -186,9 +198,15 @@ def checkTableExistance(tablesName):
     return True
 
 ####################### Remove a column data while condition on columns ###############################
-def joinColumnProcess(columnsName, conditionData):
-    col1 = conditionData[0].split('.')[1]
-    col2 = conditionData[2].split('.')[1]
+def joinColumnProcess(columnsName, conditionData): # Need to handle and or condition with join column query
+    col1 = None
+    col2 = None
+    if '.' in conditionData[0] and '.' in conditionData[2] and '=' == conditionData[1]:
+        col1 = conditionData[0].split('.')[1]
+        col2 = conditionData[2].split('.')[1]
+    else:
+        col1 = conditionData[4].split('.')[1]
+        col2 = conditionData[6].split('.')[1]
     col1Index = columnsName.index(col1)
     col2Index = columnsName.index(col2)
     if col1 == col2 or conditionData[1] == "=":
@@ -207,7 +225,10 @@ def evaluate(conditionData, tableNames, data):
         if '.' in i:
             temp = i.split('.')
             if temp[1] in metaDataDictionary[temp[0]] and temp[0] in tableNames:
-                string += data[metaDataDictionary[temp[0]].index(temp[1]) + columnsCountInTable[temp[0]]]
+                if '“' in data[metaDataDictionary[temp[0]].index(temp[1]) + columnsCountInTable[temp[0]]]:
+                    string += data[metaDataDictionary[temp[0]].index(temp[1]) + columnsCountInTable[temp[0]]].split('“')[1][:-1]
+                else:
+                    string += data[metaDataDictionary[temp[0]].index(temp[1]) + columnsCountInTable[temp[0]]]
             else:
                 sys.exit("ERROR : " + i + ' not exist!')
         elif i == '=':
@@ -228,9 +249,13 @@ def multipleTableQuery(tokens, tablesName, attributes, distinct, conditionData =
     colNames = copy.deepcopy(fileData[0])
     del fileData[0]
     for col in attributes:
-        if not col in colNames:
-            print("ERROR: Invalid Query!", "Attributes does not exist!")
-            return
+        if '.' in col:
+            colTab = col.split('.')
+            if colTab[0] not in tablesName or colTab[1] not in metaDataDictionary[colTab[0]]:
+                sys.exit("ERROR: no such column: " + col)
+
+        elif not col in colNames:
+            sys.exit("ERROR: Invalid Query! Attributes does not exist!")
 
     if distinct == True:
         fileData = getDistinctData(fileData)
@@ -239,19 +264,31 @@ def multipleTableQuery(tokens, tablesName, attributes, distinct, conditionData =
         fileData = whereQueryProcess(fileData, conditionData, colNames, tablesName, join)
 
     colIndex = []
+    attributes = processColumnName(attributes)
     for col in attributes:
         index = 0
         for i in colNames:
-            if i == col:
+            if i == col and index not in colIndex:
                 colIndex.append(index)
+                break
             index += 1
 
-    for item in fileData:
-        for col in range(len(item)-1,-1,-1):
-            if col not in colIndex:
-                del item[col]
-
+    if len(colIndex) < len(fileData[0]):
+        newFileData = []
+        for item in fileData:
+            temp = []
+            for col in colIndex:
+                temp.append(item[col])
+            newFileData.append(temp)
+        return newFileData, colNames
     return fileData, colNames
+
+####################### To get column name by saperating tablename ###############################
+def processColumnName(columnsName):
+    for col in range(len(columnsName)):
+        if '.' in columnsName[col]:
+            columnsName[col] = columnsName[col].split('.')[1]
+    return columnsName
 
 ####################### To Get Distinct Data ###############################
 def getDistinctData(fileData):
@@ -266,10 +303,12 @@ def joinTwo(table1, table2):
     if not len(table1):
         return table2
     joinTable = []
-    joinTable.append(table1[0] + table2[0])
+    data = table1[0] + table2[0]
+    joinTable.append(data)
     for i in range(1,len(table1)):
         for j in range(1,len(table2)):
-            joinTable.append(table1[i]+table2[j])
+            data = table1[i]+table2[j]
+            joinTable.append(data)
     return joinTable
 
 ####################### Join Tables ###############################
@@ -281,8 +320,16 @@ def joinQuery(tableList, table_columns):
         joinTable = joinTwo(joinTable,data)
     return joinTable
 
+####################### Remove Double Quotes From Data ###############################
+def removeQuotes(fileData):
+    for item in fileData:
+        for index in range(len(item)):
+            if '“' in item[index]:
+                item[index] = item[index].split('“')[1][:-1]
+
 ####################### Print Output Data ###############################
 def printData(fileData):
+    removeQuotes(fileData)
     for data in fileData:
         string = ""
         for col in data:
@@ -293,16 +340,19 @@ def printData(fileData):
 
 ####################### Print Header of output Data ###############################
 def printHeader(columnNames,tableNames, conditionData = ['']):
+    columnNames =  processColumnName(columnNames)
+    metadata = copy.deepcopy(metaDataDictionary)
     print("output:")
     string = []
-    for tab in tableNames:
-        for col in columnNames:
-            if col in metaDataDictionary[tab]:
-                if (tab + '.' + col) not in string:
-                    if len(string):
-                        string.append(',')
-                    if (tab + '.' + col) != str(conditionData[0]):
-                        string.append(tab + '.' + col)
+    for col in columnNames:
+        for tab in tableNames:
+            if col in metadata[tab]:
+                index = metadata[tab].index(col)
+                del metadata[tab][index]
+                if len(string):
+                    string.append(',')
+                string.append(tab + '.' + col)
+                break
     for item in string:
         print(item, end="")
     print()
@@ -319,27 +369,31 @@ def getColName(token):
 def getTablesName(token):
     return re.sub(r"[\,]",' ',token).split()
 
-####################### Read Meta Data ###############################
-def readMetadata():
-    f = open('./metadata.txt','r')
+
+####################### Read Meta Data Function ###############################
+def CollectMetaData():
+    if not os.path.exists('./metadata.txt'):
+        sys.exit("ERROR : Metadata File Does Not Exist!")
+    
     check = 0
-    for line in f:
+    filePtr = open('./metadata.txt','r')
+    for line in filePtr:
         if line.strip() == "<begin_table>":
             check = 1
             continue
         if check == 1:
             tableName = line.strip()
-            metaDataDictionary[tableName] = []
             # Keep track of total columns in previous tables
             columnsCountInTable[tableName] = 0
+            metaDataDictionary[tableName] = []
             for val in metaDataDictionary:
                 columnsCountInTable[tableName] += len(metaDataDictionary[val]) 
-            check = 0
+            check = not check
             continue
-        if not line.strip() == '<end_table>':
+        if not line.strip() == "<end_table>":
             metaDataDictionary[tableName].append(line.strip())
 
-####################### Parse Query ###############################
+####################### Parse Query Function ###############################
 def parseQuery(query):
     try:
         parsedQuery = sqlparse.parse(query)[0].tokens
@@ -349,6 +403,7 @@ def parseQuery(query):
         
         for i in l:
             identifierList.append(str(i))
+
         if len(identifierList) < 4:
             sys.exit("ERROR : Invalid Query!")
 
