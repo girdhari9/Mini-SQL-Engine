@@ -1,12 +1,9 @@
 import sys
 import csv
-import operator 
 import sqlparse
-from collections import Counter
 from collections import OrderedDict
 import re
 import os
-from pprint import pprint
 import copy 
 
 metaDataDictionary = {}
@@ -18,8 +15,9 @@ def queryExecution(parsedQuery, tokens):
     ####################### Handling Simple Select Query ###############################
     if (len(tokens) == 4):
         tablesName = getTablesName(tokens[3])
-        if not checkTableExistance(tablesName):
-            print("ERROR : Table does not exists!")
+        isExist, table = checkTableExistance(tablesName)
+        if not isExist:
+            print("Error: no such table: " + table)
             return
 
         function = re.sub(r"[\(\)]",' ',tokens[1]).split()
@@ -30,7 +28,10 @@ def queryExecution(parsedQuery, tokens):
                     columnsName.append(columnName)
         else:
             columnsName = getColName(tokens[1])
-        
+            for columnName in columnsName:
+                if not checkColumnAmb(tokens, tablesName, metaDataDictionary, columnName):
+                    sys.exit("Error: Ambiguous column name: " + columnName)
+
         if not function[0].lower() in aggregateFunction:
             fileData, colNames = multipleTableQuery(tokens, tablesName, columnsName, False)
             printHeader(columnsName, tablesName)
@@ -47,12 +48,12 @@ def queryExecution(parsedQuery, tokens):
                 tablesName = [colTab[0]]
 
             if not checkColumnAmb(tokens, tablesName, metaDataDictionary, columnName):
-                sys.exit("ERROR : Ambiguous column name: " + columnName)
+                sys.exit("Error: Ambiguous column name: " + columnName)
 
             fileData, colNames = multipleTableQuery(tokens, tablesName, columnName, False)
 
             if columnName not in colNames:
-                sys.exit("ERROR : no such column" + columnName)
+                sys.exit("Error : no such column" + columnName)
 
             columnsName = [columnName]
             printHeader(columnsName, tablesName)
@@ -65,8 +66,9 @@ def queryExecution(parsedQuery, tokens):
     ####################### Handling where statements ###############################
     else:
         tablesName = getTablesName(tokens[fromIndex[0] + 1])
-        if not checkTableExistance(tablesName):
-            print("ERROR : Table does not exists!")
+        isExist, table = checkTableExistance(tablesName)
+        if not isExist:
+            print("Error: no such table: " + table)
             return
 
         columnsName = []
@@ -83,10 +85,9 @@ def queryExecution(parsedQuery, tokens):
             columnsName = getColName(tokens[fromIndex[0] - 1])
             for columnName in columnsName:
                 if not checkColumnAmb(tokens, tablesName, metaDataDictionary, columnName):
-                    sys.exit("ERROR : Ambiguous column name: " + columnName)
+                    sys.exit("Error: Ambiguous column name: " + columnName)
 
         conditionData, join = processWhere(tokens, columnsName, tablesName, distinct)
-        #check all columns that are to be projected are exist or not
         fileData, colNames = multipleTableQuery(tokens, tablesName, columnsName, distinct, conditionData, join)
 
         if join and tokens[fromIndex[0] - 1] == "*":
@@ -135,7 +136,7 @@ def aggregateOperation(operation, colList):
         for col in range(len(colList)):
             print(colList[col])
     else:
-        print("ERROR: ","Unknown function : ", '"' + function[0] + '"')
+        print("Error: ","Unknown function : ", '"' + function[0] + '"')
 
 ####################### Check Ambiguous Columns ###############################
 def checkColumnAmb(tokens, tablesName, metaDataDictionary, columnName):
@@ -194,28 +195,30 @@ def whereQueryProcess(fileData, conditionData, columnsName, tablesName, join):
 def checkTableExistance(tablesName):
     for tab in tablesName:
         if not os.path.exists(tab + '.csv'):
-            return False
-    return True
+            return False, tab
+    return True, -1
 
 ####################### Remove a column data while condition on columns ###############################
-def joinColumnProcess(columnsName, conditionData): # Need to handle and or condition with join column query
-    col1 = None
-    col2 = None
+def joinColumnProcess(columnsName, conditionData):
+    col1, col2, cond = None, None, None
+
     if '.' in conditionData[0] and '.' in conditionData[2] and '=' == conditionData[1]:
         col1 = conditionData[0].split('.')[1]
         col2 = conditionData[2].split('.')[1]
+        cond = conditionData[1]
     else:
         col1 = conditionData[4].split('.')[1]
         col2 = conditionData[6].split('.')[1]
-    col1Index = columnsName.index(col1)
-    col2Index = columnsName.index(col2)
-    if col1 == col2 or conditionData[1] == "=":
-        if col1Index < col2Index:
-            columnsName.pop(col1Index)
-            return columnsName, col1Index
-        else:
-            columnsName.pop(col2Index)
-            return columnsName, col2Index
+        cond = conditionData[5]
+
+    if col1 == col2 and cond == "=": 
+        colIndex = rindex(columnsName, col1)
+        columnsName.pop(colIndex) 
+        return columnsName, colIndex
+
+####################### To Find Index From Last ###############################
+def rindex(mylist, myvalue):
+    return len(mylist) - mylist[::-1].index(myvalue) - 1
 
 ####################### Evaluate Where Condition ###############################
 def evaluate(conditionData, tableNames, data):
@@ -230,7 +233,7 @@ def evaluate(conditionData, tableNames, data):
                 else:
                     string += data[metaDataDictionary[temp[0]].index(temp[1]) + columnsCountInTable[temp[0]]]
             else:
-                sys.exit("ERROR : " + i + ' not exist!')
+                sys.exit("Error: no such table: " + i)
         elif i == '=':
             string += i*2
         elif i.lower() not in op and i.isalpha() == True:
@@ -252,10 +255,10 @@ def multipleTableQuery(tokens, tablesName, attributes, distinct, conditionData =
         if '.' in col:
             colTab = col.split('.')
             if colTab[0] not in tablesName or colTab[1] not in metaDataDictionary[colTab[0]]:
-                sys.exit("ERROR: no such column: " + col)
+                sys.exit("Error: no such column: " + col)
 
         elif not col in colNames:
-            sys.exit("ERROR: Invalid Query! Attributes does not exist!")
+            sys.exit("Error: no such column: " + col)
 
     if distinct == True:
         fileData = getDistinctData(fileData)
@@ -265,6 +268,7 @@ def multipleTableQuery(tokens, tablesName, attributes, distinct, conditionData =
 
     colIndex = []
     attributes = processColumnName(attributes)
+
     for col in attributes:
         index = 0
         for i in colNames:
@@ -272,7 +276,7 @@ def multipleTableQuery(tokens, tablesName, attributes, distinct, conditionData =
                 colIndex.append(index)
                 break
             index += 1
-
+    print(colNames)
     if len(colIndex) < len(fileData[0]):
         newFileData = []
         for item in fileData:
@@ -371,9 +375,9 @@ def getTablesName(token):
 
 
 ####################### Read Meta Data Function ###############################
-def CollectMetaData():
+def collectMetaData():
     if not os.path.exists('./metadata.txt'):
-        sys.exit("ERROR : Metadata File Does Not Exist!")
+        sys.exit("Error: Metadata File Does Not Exist!")
     
     check = 0
     filePtr = open('./metadata.txt','r')
@@ -405,35 +409,43 @@ def parseQuery(query):
             identifierList.append(str(i))
 
         if len(identifierList) < 4:
-            sys.exit("ERROR : Invalid Query!")
+            sys.exit("Error: near \";\" : syntax error")
 
         if (str(queryType) == 'SELECT'):
             tokens = [item.lower() for item in identifierList]
             fromIndex.append(tokens.index('from'))
 
             if fromIndex == -1:
-                sys.exit("ERROR : Syntex error!")
+                sys.exit("Error: near \"SELECT\": syntax Error")
             queryExecution(parsedQuery, identifierList)
         else:
             print("Incorrect Query!\nOnly SELECT DML is supported!")
     except:
-        print("Something went wrong!")
+        print("Error: near \";\" : syntax error")
+
+####################### Check Query ###############################
+def checkValidQuery(query):
+    query = query.strip()
+    if(query == "exit" or query == "quit"):
+        sys.exit()
+    elif query.lower() == 'show database':
+        print("Database: ",metaDataDictionary)
+    elif query[-1] is not ';':
+        parseQuery(query)
+    else:
+        parseQuery(query[:-1])
 
 ####################### Main Function ###############################
 def main():
-    readMetadata()
-    while(1):
-        print("msql>", end="")
-        query = input()
-        query = query.strip()
-        if(query == "exit" or query == "quit"):
-            break
-        elif query.lower() == 'show database':
-            print("Database Structure: ",metaDataDictionary)
-        elif query[-1] is not ';':
-            print("ERROR : Syntex Error!")
-        else:
-            parseQuery(query[:-1])
+    collectMetaData()
+    try:
+        query = sys.argv[1]
+        checkValidQuery(query)
+    except:
+        while(1):
+            print("msql>", end="")
+            query = input()
+            checkValidQuery(query)
 
 if __name__ == "__main__":
     main()
