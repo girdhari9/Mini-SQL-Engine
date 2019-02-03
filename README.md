@@ -14,9 +14,11 @@ Mini Sql Engine is one which runs a subset of SQL Queries using command line int
 7. select * from <tableNames>
 8. select <colNames> from <tableNames>
 9. select <colnames> from <tableNames> where <join-condition>
-
+10. show database
+  
 ### How to run
-python code.py "SQL Query"
+python3 miniSQLEngine.py "SQL Query"
+python3 miniSQLEngine.py
 
 <tableName.colname> if [colnames = ambiguous]
 
