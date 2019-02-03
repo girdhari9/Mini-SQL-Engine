@@ -276,7 +276,6 @@ def multipleTableQuery(tokens, tablesName, attributes, distinct, conditionData =
                 colIndex.append(index)
                 break
             index += 1
-    print(colNames)
     if len(colIndex) < len(fileData[0]):
         newFileData = []
         for item in fileData:
